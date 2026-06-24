@@ -1,0 +1,56 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary-main: #059669; /* Emerald 600 */
+  --color-primary-hover: #047857; /* Emerald 700 */
+  --color-bg-main: #f8fafc; /* Slate 50 */
+  --color-header-main: #1e203b; /* Slate 800 */
+  --color-body-main: #64748b; /* Slate 500 */
+  --color-card-main: #ffffff;
+  
+  --animate-pulse-slow: pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  
+  --radius-xl-cozy: 16px;
+  --radius-2xl-cozy: 24px;
+  --radius-3xl-cozy: 32px;
+}
+
+@layer base {
+  body {
+    @apply bg-bg-main text-body-main font-sans min-h-screen antialiased selection:bg-primary-main/20 selection:text-primary-main;
+    font-family: 'Outfit', 'Inter', system-ui, -apple-system, sans-serif;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply text-header-main font-semibold tracking-tight;
+  }
+}
+
+/* Custom transition utility classes */
+.cozy-hover {
+  @apply transition-all duration-300 ease-out hover:scale-[1.02] hover:shadow-md active:scale-[0.98];
+}
+
+.cozy-button-gradient {
+  background: linear-gradient(135deg, #509699, #34d399);
+}
+
+.cozy-button-gradient:hover {
+  background: linear-gradient(135deg, #448082, #2ec08a);
+}
+
+.cozy-accent-gradient {
+  background: linear-gradient(135deg, #509699, #34d399);
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  @apply bg-slate-200 rounded-full hover:bg-slate-300 transition-colors;
+}
