@@ -814,17 +814,19 @@ export const Dashboard: React.FC = () => {
           Meus Favoritos ({favorites.length})
         </button>
 
-        <button
-          onClick={() => setSearchParams({ tab: 'contatos' })}
-          className={`flex items-center gap-2 px-4 py-3 border-b-2 font-bold text-xs transition-all duration-300 whitespace-nowrap cursor-pointer ${
-            currentTab === 'contatos'
-              ? 'border-emerald-600 text-emerald-600 bg-emerald-50/20'
-              : 'border-transparent text-slate-400 hover:text-slate-600 hover:border-slate-200'
-          }`}
-        >
-          <BarChart3 size={14} />
-          Métricas de Contatos
-        </button>
+        {(profile?.tipo === 'prestador' || profile?.is_admin) && (
+          <button
+            onClick={() => setSearchParams({ tab: 'contatos' })}
+            className={`flex items-center gap-2 px-4 py-3 border-b-2 font-bold text-xs transition-all duration-300 whitespace-nowrap cursor-pointer ${
+              currentTab === 'contatos'
+                ? 'border-emerald-600 text-emerald-600 bg-emerald-50/20'
+                : 'border-transparent text-slate-400 hover:text-slate-600 hover:border-slate-200'
+            }`}
+          >
+            <BarChart3 size={14} />
+            Métricas de Contatos
+          </button>
+        )}
 
         {profile?.tipo === 'prestador' && profile?.prestador_aprovado && (
           <button
