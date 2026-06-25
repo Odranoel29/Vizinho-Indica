@@ -255,9 +255,12 @@ export const Home: React.FC = () => {
                       descricao={s.descricao}
                       preco_estimado={s.preco_estimado}
                       foto_url={s.foto_url}
+                      whatsapp={s.whatsapp}
                       categoria_nome={s.categoria_nome}
                       subcategoria_nome={s.subcategoria_nome}
                       autor_nome={s.autor_nome}
+                      autor_empresa={s.autor_empresa}
+                      autor_cidade={s.autor_cidade}
                       autor_avatar={s.autor_avatar}
                       autor_id={s.autor_id}
                       media_notas={s.media_notas}

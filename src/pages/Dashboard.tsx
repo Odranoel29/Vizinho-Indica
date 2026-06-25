@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useNavigate, useSearchParams, Link } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
-import { Plus, Edit2, Trash2, Heart, BarChart3, List, ExternalLink, RefreshCw, X, AlertCircle, Archive, Shield, ImageUp, Loader, Store, UserCheck, Clock, Flag, Users, CheckCircle, ThumbsUp, ThumbsDown } from 'lucide-react'
+import { Plus, Edit2, Trash2, Heart, BarChart3, List, ExternalLink, RefreshCw, X, AlertCircle, Archive, Shield, ImageUp, Loader, Store, UserCheck, Clock, Flag, Users, CheckCircle, ThumbsUp, ThumbsDown, Camera, Building2, Phone, MapPin } from 'lucide-react'
 
 export const Dashboard: React.FC = () => {
   const { user, profile, loading: authLoading, refreshProfile } = useAuth()
@@ -15,6 +15,7 @@ export const Dashboard: React.FC = () => {
   const [categories, setCategories] = useState<any[]>([])
   const [subcategoriasDisponiveis, setSubcategoriasDisponiveis] = useState<any[]>([])
   const [leads, setLeads] = useState<any[]>([])
+  const [interacoes, setInteracoes] = useState<any[]>([])
   const [adminServices, setAdminServices] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -47,6 +48,20 @@ export const Dashboard: React.FC = () => {
   const [upgradeLoading, setUpgradeLoading] = useState(false)
   const [formValidationError, setFormValidationError] = useState('')
 
+  const [prestadorModalOpen, setPrestadorModalOpen] = useState(false)
+  const [prestadorEmpresa, setPrestadorEmpresa] = useState('')
+  const [prestadorCelular, setPrestadorCelular] = useState('')
+  const [prestadorCidade, setPrestadorCidade] = useState('')
+  const [prestadorCategoria, setPrestadorCategoria] = useState('')
+
+  const [prestadorFotoFile, setPrestadorFotoFile] = useState<File | null>(null)
+  const [prestadorFotoPreview, setPrestadorFotoPreview] = useState('')
+  const [prestadorLoading, setPrestadorLoading] = useState(false)
+  const [prestadorError, setPrestadorError] = useState('')
+  const [comprovanteFile, setComprovanteFile] = useState<File | null>(null)
+  const [comprovantePreview, setComprovantePreview] = useState('')
+  const [toast, setToast] = useState<{ show: boolean; message: string; type: 'success' | 'error' }>({ show: false, message: '', type: 'success' })
+
   const fallbackServiceImage = 'https://images.unsplash.com/photo-1581578731548-c64695cc6952?auto=format&fit=crop&w=500&q=80'
 
   const fallbackCategories = [
@@ -64,11 +79,17 @@ export const Dashboard: React.FC = () => {
 
   useEffect(() => {
     const action = searchParams.get('action')
-    if (action === 'anunciar') {
-      openCreateModal()
+    if (action === 'anunciar' && profile) {
+      if (profile.tipo !== 'prestador' || !profile.empresa_nome) {
+        setPrestadorModalOpen(true)
+      } else if (profile.tipo === 'prestador' && !profile.prestador_aprovado) {
+        // Already pending approval, just show tab
+      } else {
+        openCreateModal()
+      }
       setSearchParams({ tab: 'anuncios' })
     }
-  }, [searchParams])
+  }, [searchParams, profile])
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -89,13 +110,14 @@ export const Dashboard: React.FC = () => {
       if (myData) setMyServices(myData)
 
       // 2. Busca favoritos
+      let mappedFavs: any[] = []
       const { data: favsData } = await supabase
         .from('favoritos')
         .select('*, servicos(*, categorias(categorias))')
         .eq('usuario_id', profile?.id)
 
-      if (favsData) {
-        const mappedFavs = favsData.map(f => {
+      if (favsData && favsData.length > 0) {
+        mappedFavs = favsData.map(f => {
           if (!f.servicos) return null
           return {
             id: f.servicos.id,
@@ -105,8 +127,9 @@ export const Dashboard: React.FC = () => {
             categoria_nome: f.servicos.categorias?.categorias
           }
         }).filter(Boolean)
-        setFavorites(mappedFavs)
-      } else {
+      }
+
+      if (mappedFavs.length === 0) {
         const localFavs = JSON.parse(localStorage.getItem('favoritos') || '[]')
         if (localFavs.length > 0) {
           const { data: localFavsData } = await supabase
@@ -114,16 +137,17 @@ export const Dashboard: React.FC = () => {
             .select('*')
             .in('servico_id', localFavs)
           if (localFavsData) {
-            setFavorites(localFavsData.map(s => ({
+            mappedFavs = localFavsData.map(s => ({
               id: s.servico_id,
               titulo: s.titulo,
               preco_estimado: s.preco_estimado,
               foto_url: s.foto_url,
               categoria_nome: s.categoria_nome
-            })))
+            }))
           }
         }
       }
+      setFavorites(mappedFavs)
 
       // 3. Busca categorias
       const { data: catData, error: catError } = await supabase
@@ -165,7 +189,16 @@ export const Dashboard: React.FC = () => {
         setLeads(simulatedLeads)
       }
 
-      // 5. Se for admin, busca dados administrativos
+      // 5. Busca interações
+      const { data: interacoesData } = await supabase
+        .from('interacoes')
+        .select('*')
+        .eq('prestador_id', profile.id)
+        .order('data_contato', { ascending: false })
+
+      if (interacoesData) setInteracoes(interacoesData)
+
+      // 6. Se for admin, busca dados administrativos
       if (profile.is_admin) {
         const { data: adminData } = await supabase
           .from('servicos')
@@ -460,6 +493,102 @@ export const Dashboard: React.FC = () => {
     }
   }
 
+  const handlePrestadorSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!profile) return
+    setPrestadorLoading(true)
+    setPrestadorError('')
+
+    const nomePreenchido = prestadorEmpresa.trim() || profile.nome_completo
+    if (!prestadorCelular.trim()) {
+      setPrestadorError('Informe o número de celular.')
+      setPrestadorLoading(false)
+      return
+    }
+    if (!prestadorCidade.trim()) {
+      setPrestadorError('Informe sua cidade.')
+      setPrestadorLoading(false)
+      return
+    }
+    if (!prestadorCategoria) {
+      setPrestadorError('Selecione uma categoria.')
+      setPrestadorLoading(false)
+      return
+    }
+    if (!comprovanteFile && !profile.comprovante_url) {
+      setPrestadorError('Anexe o comprovante de pagamento da taxa de manutenção.')
+      setPrestadorLoading(false)
+      return
+    }
+
+    try {
+      const cat = categories.find(c => c.categorias === prestadorCategoria)
+      if (!cat) throw new Error('Categoria não encontrada.')
+
+      let avatarUrlFinal = profile.avatar_url
+
+      if (prestadorFotoFile) {
+        const fileExt = prestadorFotoFile.name.split('.').pop()?.toLowerCase() || 'jpg'
+        const fileName = `logo-${Date.now()}-${Math.random().toString(36).slice(2)}.${fileExt}`
+        const filePath = `${profile.id}/${fileName}`
+
+        const { error: uploadError } = await supabase.storage
+          .from('servicos')
+          .upload(filePath, prestadorFotoFile, { cacheControl: '3600', upsert: false })
+
+        if (uploadError) throw uploadError
+
+        const { data: publicUrlData } = supabase.storage.from('servicos').getPublicUrl(filePath)
+        avatarUrlFinal = publicUrlData?.publicUrl || profile.avatar_url
+      }
+
+      let comprovanteUrlFinal = profile.comprovante_url || null
+
+      if (comprovanteFile) {
+        const fileExt = comprovanteFile.name.split('.').pop()?.toLowerCase() || 'jpg'
+        const fileName = `comprovante-${Date.now()}-${Math.random().toString(36).slice(2)}.${fileExt}`
+        const filePath = `${profile.id}/${fileName}`
+
+        const { error: uploadError } = await supabase.storage
+          .from('servicos')
+          .upload(filePath, comprovanteFile, { cacheControl: '3600', upsert: false })
+
+        if (uploadError) throw uploadError
+
+        const { data: publicUrlData } = supabase.storage.from('servicos').getPublicUrl(filePath)
+        comprovanteUrlFinal = publicUrlData?.publicUrl || null
+      }
+
+      const { error } = await supabase
+        .from('usuarios')
+        .update({
+          empresa_nome: nomePreenchido,
+          celular: prestadorCelular,
+          cidade: prestadorCidade,
+          categoria_prestador: cat.id,
+
+          avatar_url: avatarUrlFinal,
+          comprovante_url: comprovanteUrlFinal,
+          tipo: 'prestador',
+          prestador_aprovado: false,
+          pagamento_status: 'aberto'
+        })
+        .eq('id', profile.id)
+
+      if (error) throw error
+
+      await refreshProfile()
+      setPrestadorModalOpen(false)
+      setToast({ show: true, message: 'Cadastro enviado! Aguarde a liberação do administrador.', type: 'success' })
+      setTimeout(() => setToast(t => ({ ...t, show: false })), 3000)
+
+    } catch (err: any) {
+      setPrestadorError(err.message || 'Erro ao salvar cadastro.')
+    } finally {
+      setPrestadorLoading(false)
+    }
+  }
+
   // Suspende automaticamente se expirou
   React.useEffect(() => {
     if (isExpirado && profile?.tipo === 'prestador' && profile?.prestador_aprovado) {
@@ -477,31 +606,13 @@ export const Dashboard: React.FC = () => {
     }
   }, [isExpirado])
 
-  const handleSolicitarUpgrade = async () => {
-    if (!profile) return
-    setUpgradeLoading(true)
-
-    try {
-      const { error } = await supabase
-        .from('usuarios')
-        .update({ tipo: 'prestador', prestador_aprovado: false })
-        .eq('id', profile.id)
-
-      if (error) throw error
-      await refreshProfile()
-    } catch (err: any) {
-      console.error('Erro ao solicitar upgrade:', err)
-    } finally {
-      setUpgradeLoading(false)
-    }
-  }
-
   const handleAprovarPrestador = async (userId: number) => {
     try {
       const { error } = await supabase
         .from('usuarios')
         .update({
           prestador_aprovado: true,
+          pagamento_status: 'pago',
           prestador_desde: new Date().toISOString(),
           prestador_expiracao: new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString()
         })
@@ -509,6 +620,8 @@ export const Dashboard: React.FC = () => {
 
       if (error) throw error
       fetchData()
+      setToast({ show: true, message: 'Prestador aprovado com sucesso!', type: 'success' })
+      setTimeout(() => setToast(t => ({ ...t, show: false })), 3000)
     } catch (err) {
       console.error('Erro ao aprovar prestador:', err)
     }
@@ -586,6 +699,15 @@ export const Dashboard: React.FC = () => {
   return (
     <div className="max-w-6xl mx-auto px-6 py-8 flex flex-col gap-6 text-left relative min-h-[80vh]">
       
+      {/* Toast */}
+      {toast.show && (
+        <div className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-2xl-cozy text-xs font-bold shadow-lg transition-all duration-300 ${
+          toast.type === 'success' ? 'bg-emerald-600 text-white' : 'bg-red-600 text-white'
+        }`}>
+          {toast.message}
+        </div>
+      )}
+
       {/* Cabeçalho */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
@@ -704,6 +826,20 @@ export const Dashboard: React.FC = () => {
           Métricas de Contatos
         </button>
 
+        {profile?.tipo === 'prestador' && profile?.prestador_aprovado && (
+          <button
+            onClick={() => setSearchParams({ tab: 'interacoes' })}
+            className={`flex items-center gap-2 px-4 py-3 border-b-2 font-bold text-xs transition-all duration-300 whitespace-nowrap cursor-pointer ${
+              currentTab === 'interacoes'
+                ? 'border-emerald-600 text-emerald-600 bg-emerald-50/20'
+                : 'border-transparent text-slate-400 hover:text-slate-600 hover:border-slate-200'
+            }`}
+          >
+            <RefreshCw size={14} />
+            Interações ({interacoes.length})
+          </button>
+        )}
+
         {profile?.is_admin && (
           <button
             onClick={() => setSearchParams({ tab: 'admin' })}
@@ -737,12 +873,11 @@ export const Dashboard: React.FC = () => {
                 </p>
               </div>
               <button
-                onClick={handleSolicitarUpgrade}
-                disabled={upgradeLoading}
-                className="text-white font-extrabold px-5 py-2.5 rounded-xl-cozy shadow-xs shadow-emerald-500/10 hover:shadow-md transition-all duration-300 cozy-button-gradient hover:scale-102 active:scale-98 flex items-center gap-1.5 cursor-pointer text-xs disabled:opacity-50"
+                onClick={() => setPrestadorModalOpen(true)}
+                className="text-white font-extrabold px-5 py-2.5 rounded-xl-cozy shadow-xs shadow-emerald-500/10 hover:shadow-md transition-all duration-300 cozy-button-gradient hover:scale-102 active:scale-98 flex items-center gap-1.5 cursor-pointer text-xs"
               >
-                {upgradeLoading ? <Loader size={12} className="animate-spin" /> : <Store size={14} />}
-                {upgradeLoading ? 'Solicitando...' : 'Quero ser Prestador'}
+                <Store size={14} />
+                Quero ser Prestador
               </button>
             </div>
           ) : profile?.tipo === 'prestador' && !profile?.prestador_aprovado ? (
@@ -1064,6 +1199,84 @@ export const Dashboard: React.FC = () => {
           </div>
         )}
 
+        {currentTab === 'interacoes' && profile?.tipo === 'prestador' && (
+          <div className="flex flex-col gap-6">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+              <div className="bg-white rounded-2xl-cozy border border-slate-100 p-4 shadow-xs flex flex-col gap-1">
+                <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">Total</span>
+                <span className="text-xl font-black text-slate-800">{interacoes.length}</span>
+                <span className="text-[9px] text-slate-400">interações</span>
+              </div>
+              <div className="bg-white rounded-2xl-cozy border border-slate-100 p-4 shadow-xs flex flex-col gap-1">
+                <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">Avaliações</span>
+                <span className="text-xl font-black text-emerald-600">{interacoes.filter(i => i.status === 'AVALIADO').length}</span>
+                <span className="text-[9px] text-slate-400">recebidas</span>
+              </div>
+              <div className="bg-white rounded-2xl-cozy border border-slate-100 p-4 shadow-xs flex flex-col gap-1">
+                <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">Pendentes</span>
+                <span className="text-xl font-black text-amber-600">{interacoes.filter(i => i.status === 'PENDENTE' || i.status === 'LIBERADO').length}</span>
+                <span className="text-[9px] text-slate-400">aguardando</span>
+              </div>
+              <div className="bg-white rounded-2xl-cozy border border-slate-100 p-4 shadow-xs flex flex-col gap-1">
+                <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">Cancelado</span>
+                <span className="text-xl font-black text-red-600">{interacoes.filter(i => i.status === 'CANCELADO').length}</span>
+                <span className="text-[9px] text-slate-400">cancelados</span>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-3xl-cozy border border-slate-100 overflow-hidden shadow-xs">
+              <div className="p-5 border-b border-slate-100">
+                <h3 className="font-extrabold text-slate-800 text-sm">Histórico de Interações</h3>
+                <p className="text-slate-400 text-[10px] mt-0.5">Todos os cliques no WhatsApp e status atual</p>
+              </div>
+              {interacoes.length > 0 ? (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-slate-50 text-slate-500 font-bold uppercase tracking-wider border-b border-slate-100">
+                        <th className="px-6 py-4">Cliente</th>
+                        <th className="px-6 py-4">WhatsApp</th>
+                        <th className="px-6 py-4">Data</th>
+                        <th className="px-6 py-4">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {interacoes.map((item) => {
+                        const statusLabels: Record<string, { label: string; class: string }> = {
+                          PENDENTE: { label: 'Pendente', class: 'bg-amber-50 text-amber-700' },
+                          LIBERADO: { label: 'Liberado', class: 'bg-emerald-50 text-emerald-700' },
+                          AVALIADO: { label: 'Avaliado', class: 'bg-blue-50 text-blue-700' },
+                          CANCELADO: { label: 'Cancelado', class: 'bg-red-50 text-red-700' },
+                        }
+                        const st = statusLabels[item.status] || { label: item.status, class: 'bg-slate-50 text-slate-500' }
+                        return (
+                          <tr key={item.id} className="hover:bg-slate-50/50 transition-colors">
+                            <td className="px-6 py-4 font-bold text-slate-700">{item.cliente_nome}</td>
+                            <td className="px-6 py-4 text-slate-400">{item.cliente_whatsapp}</td>
+                            <td className="px-6 py-4 text-slate-400">
+                              {new Date(item.data_contato).toLocaleDateString('pt-BR')}
+                            </td>
+                            <td className="px-6 py-4">
+                              <span className={`inline-flex px-2 py-0.5 rounded-full text-[9px] font-bold ${st.class}`}>
+                                {st.label}
+                              </span>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="text-center py-10 flex flex-col items-center gap-2">
+                  <RefreshCw size={20} className="text-slate-300" />
+                  <p className="text-slate-400 text-xs">Nenhuma interação registrada ainda.</p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {currentTab === 'admin' && profile?.is_admin && (
           <div className="flex flex-col gap-6">
             <div className="bg-amber-50 border border-amber-200 rounded-2xl-cozy p-4 flex items-center gap-3">
@@ -1088,17 +1301,41 @@ export const Dashboard: React.FC = () => {
                   <table className="w-full text-left border-collapse text-xs">
                     <thead>
                       <tr className="bg-slate-50 text-slate-500 font-bold uppercase tracking-wider border-b border-slate-100">
-                        <th className="px-6 py-4">Nome</th>
-                        <th className="px-6 py-4">Email</th>
-                        <th className="px-6 py-4 text-center">Ação</th>
+                        <th className="px-4 py-3">Empresa</th>
+                        <th className="px-4 py-3">Responsável</th>
+                        <th className="px-4 py-3">Contato</th>
+                        <th className="px-4 py-3">Cidade</th>
+                        <th className="px-4 py-3">Categoria</th>
+                        <th className="px-4 py-3 text-center">Comprovante</th>
+                        <th className="px-4 py-3 text-center">Ação</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {prestadoresPendentes.map((p) => (
+                      {prestadoresPendentes.map((p) => {
+                        const catNome = categories.find(c => c.id === p.categoria_prestador)?.categorias || ''
+                        return (
                         <tr key={p.id} className="hover:bg-slate-50/50 transition-colors">
-                          <td className="px-6 py-4 font-bold text-slate-700">{p.nome_completo}</td>
-                          <td className="px-6 py-4 text-slate-500">{p.email}</td>
-                          <td className="px-6 py-4 text-center">
+                          <td className="px-4 py-3 font-bold text-slate-700">{p.empresa_nome || p.nome_completo}</td>
+                          <td className="px-4 py-3 text-slate-500">{p.nome_completo}</td>
+                          <td className="px-4 py-3 text-slate-500">{p.celular || p.whatsapp || '-'}</td>
+                          <td className="px-4 py-3 text-slate-500">{p.cidade || '-'}</td>
+                          <td className="px-4 py-3"><span className="bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full text-[9px] font-bold">{catNome || '-'}</span></td>
+                          <td className="px-4 py-3 text-center">
+                            {p.comprovante_url ? (
+                              <a
+                                href={p.comprovante_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 text-emerald-600 hover:text-emerald-800 font-bold text-[10px] underline"
+                              >
+                                <ImageUp size={10} />
+                                Ver
+                              </a>
+                            ) : (
+                              <span className="text-slate-400 text-[9px]">Sem comprovante</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-center">
                             <button
                               onClick={() => handleAprovarPrestador(p.id)}
                               className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 font-bold px-3 py-1.5 rounded-xl-cozy transition-colors cursor-pointer text-[10px]"
@@ -1108,7 +1345,7 @@ export const Dashboard: React.FC = () => {
                             </button>
                           </td>
                         </tr>
-                      ))}
+                      )})}
                     </tbody>
                   </table>
                 </div>
@@ -1608,6 +1845,192 @@ export const Dashboard: React.FC = () => {
                 </button>
               </div>
 
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Cadastro Prestador */}
+      {prestadorModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-800/40 backdrop-blur-xs">
+          <div className="bg-white rounded-3xl-cozy w-full max-w-lg shadow-xl border border-slate-100 flex flex-col max-h-[90vh] animate-in fade-in zoom-in duration-200">
+            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+              <h2 className="font-extrabold text-sm text-slate-800">Torne-se um Prestador</h2>
+              <button
+                onClick={() => setPrestadorModalOpen(false)}
+                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <form onSubmit={handlePrestadorSubmit} className="flex-1 overflow-y-auto p-6 flex flex-col gap-4 text-left">
+              {prestadorError && (
+                <div className="bg-red-50 text-red-600 text-xs font-semibold p-3.5 rounded-xl-cozy border border-red-100">
+                  {prestadorError}
+                </div>
+              )}
+
+              <div className="flex flex-col gap-2 items-center">
+                <label className="relative w-20 h-20 rounded-full overflow-hidden border-2 border-dashed border-slate-200 bg-slate-50 hover:border-emerald-400 transition-all cursor-pointer group flex items-center justify-center">
+                  {prestadorFotoPreview ? (
+                    <img src={prestadorFotoPreview} alt="Preview" className="w-full h-full object-cover" />
+                  ) : profile?.avatar_url ? (
+                    <img src={profile.avatar_url} alt="Foto" className="w-full h-full object-cover" />
+                  ) : (
+                    <Camera size={22} className="text-slate-300 group-hover:text-emerald-500 transition-colors" />
+                  )}
+                  <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-all rounded-full flex items-center justify-center">
+                    <Camera size={16} className="text-white opacity-0 group-hover:opacity-100 transition-all" />
+                  </div>
+                  <input
+                    type="file"
+                    accept=".jpg,.jpeg,.png,.webp"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0]
+                      if (file) {
+                        setPrestadorFotoFile(file)
+                        setPrestadorFotoPreview(URL.createObjectURL(file))
+                      }
+                    }}
+                  />
+                </label>
+                <span className="text-[9px] text-slate-400 font-semibold">Foto de perfil ou logo</span>
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <label className="text-[10px] font-bold text-slate-700 uppercase tracking-wider pl-1">
+                  <Building2 size={10} className="inline mr-1" />
+                  Nome da Empresa
+                </label>
+                <input
+                  type="text"
+                  placeholder={profile?.nome_completo || "Sua empresa (ou seu nome)"}
+                  value={prestadorEmpresa}
+                  onChange={(e) => setPrestadorEmpresa(e.target.value)}
+                  className="w-full px-4 py-2.5 rounded-2xl-cozy border border-slate-200 text-slate-700 placeholder-slate-400 focus:outline-hidden focus:border-emerald-500 text-xs bg-slate-50/50"
+                />
+                <span className="text-[9px] text-slate-400 pl-1">Se não tiver empresa, usaremos seu nome</span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="flex flex-col gap-1">
+                  <label className="text-[10px] font-bold text-slate-700 uppercase tracking-wider pl-1">
+                    <Phone size={10} className="inline mr-1" />
+                    Celular <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="tel"
+                    placeholder="(11) 99999-9999"
+                    value={prestadorCelular}
+                    onChange={(e) => {
+                      let v = e.target.value.replace(/\D/g, '').slice(0, 11)
+                      if (v.length > 2) v = `(${v.slice(0, 2)}) ${v.slice(2)}`
+                      if (v.length > 10) v = `${v.slice(0, 10)}-${v.slice(10)}`
+                      setPrestadorCelular(v)
+                    }}
+                    className="w-full px-4 py-2.5 rounded-2xl-cozy border border-slate-200 text-slate-700 placeholder-slate-400 focus:outline-hidden focus:border-emerald-500 text-xs bg-slate-50/50"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <label className="text-[10px] font-bold text-slate-700 uppercase tracking-wider pl-1">
+                    <MapPin size={10} className="inline mr-1" />
+                    Cidade <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Ex: São Paulo - SP"
+                    value={prestadorCidade}
+                    onChange={(e) => setPrestadorCidade(e.target.value)}
+                    className="w-full px-4 py-2.5 rounded-2xl-cozy border border-slate-200 text-slate-700 placeholder-slate-400 focus:outline-hidden focus:border-emerald-500 text-xs bg-slate-50/50"
+                  />
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <label className="text-[10px] font-bold text-slate-700 uppercase tracking-wider pl-1">
+                  Categoria Principal <span className="text-red-500">*</span>
+                </label>
+                <select
+                  value={prestadorCategoria}
+                  onChange={(e) => setPrestadorCategoria(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-2xl-cozy border border-slate-200 text-slate-700 focus:outline-hidden focus:border-emerald-500 text-xs bg-slate-50/50 cursor-pointer font-semibold"
+                >
+                  <option value="">Selecione uma categoria</option>
+                  {categories.map((cat) => (
+                    <option key={cat.id} value={cat.categorias}>{cat.categorias}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <label className="text-[10px] font-bold text-slate-700 uppercase tracking-wider pl-1">
+                  Comprovante de Pagamento <span className="text-red-500">*</span>
+                </label>
+                <label className="relative flex flex-col items-center justify-center w-full h-24 rounded-2xl-cozy border-2 border-dashed border-slate-200 bg-slate-50/50 hover:bg-slate-100/50 hover:border-emerald-400 transition-all duration-300 cursor-pointer group overflow-hidden">
+                  {comprovantePreview ? (
+                    <>
+                      <img src={comprovantePreview} alt="Comprovante" className="w-full h-full object-cover absolute inset-0" />
+                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-all flex items-center justify-center">
+                        <ImageUp size={20} className="text-white opacity-0 group-hover:opacity-100 transition-all" />
+                      </div>
+                    </>
+                  ) : (
+                    <div className="flex flex-col items-center gap-1">
+                      <ImageUp size={20} className="text-slate-300 group-hover:text-emerald-500 transition-colors" />
+                      <span className="text-[9px] font-bold text-slate-400 group-hover:text-emerald-600 transition-colors">Anexar comprovante PIX</span>
+                    </div>
+                  )}
+                  <input
+                    type="file"
+                    accept=".jpg,.jpeg,.png,.webp,.pdf"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0]
+                      if (file) {
+                        setComprovanteFile(file)
+                        setComprovantePreview(URL.createObjectURL(file))
+                      }
+                    }}
+                  />
+                </label>
+                <span className="text-[9px] text-slate-400 pl-1">Anexe foto do comprovante PIX ou transferência</span>
+              </div>
+
+              <div className="bg-amber-50 border border-amber-200 rounded-2xl-cozy p-4 flex flex-col gap-2 mt-2">
+                <p className="font-bold text-amber-800 text-xs flex items-center gap-1">
+                  <Clock size={12} />
+                  Pagamento da Taxa de Manutenção
+                </p>
+                <p className="text-amber-700 text-[10px] leading-relaxed">
+                  Para ativar seu cadastro, pague <strong>R$ 100,00</strong> via PIX e anexe o comprovante abaixo.
+                </p>
+                <div className="bg-white rounded-xl-cozy border border-amber-100 p-3 flex flex-col gap-1">
+                  <p className="text-[10px] font-bold text-slate-700">Dados para PIX:</p>
+                  <p className="text-[10px] text-slate-600"><strong>Chave:</strong> lsmello93@hotmail.com</p>
+                  <p className="text-[10px] text-slate-600"><strong>Valor:</strong> R$ 100,00</p>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 mt-2 pt-4 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setPrestadorModalOpen(false)}
+                  className="px-4 py-2 rounded-xl-cozy text-xs border border-slate-200 text-slate-500 hover:bg-slate-50 cursor-pointer font-bold"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={prestadorLoading}
+                  className="text-white font-extrabold px-5 py-2 rounded-xl-cozy shadow-xs shadow-emerald-500/10 hover:shadow-md transition-all duration-300 cozy-button-gradient hover:scale-102 active:scale-98 disabled:opacity-50 cursor-pointer text-xs flex items-center gap-1.5"
+                >
+                  {prestadorLoading ? <Loader size={12} className="animate-spin" /> : <Store size={12} />}
+                  {prestadorLoading ? 'Salvando...' : 'Salvar e Solicitar Aprovação'}
+                </button>
+              </div>
             </form>
           </div>
         </div>

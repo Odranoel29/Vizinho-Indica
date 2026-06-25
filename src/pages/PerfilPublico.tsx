@@ -150,9 +150,12 @@ const PerfilPublico: React.FC = () => {
                 descricao={s.descricao}
                 preco_estimado={s.preco_estimado}
                 foto_url={s.foto_url}
+                whatsapp={s.whatsapp}
                 categoria_nome={s.categoria_nome}
                 subcategoria_nome={s.subcategoria_nome}
                 autor_nome={s.autor_nome}
+                autor_empresa={s.autor_empresa}
+                autor_cidade={s.autor_cidade}
                 autor_avatar={s.autor_avatar}
                 media_notas={s.media_notas}
                 total_avaliacoes={s.total_avaliacoes}

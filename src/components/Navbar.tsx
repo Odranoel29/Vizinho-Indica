@@ -1,7 +1,7 @@
 import React from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
-import { LogOut, LayoutDashboard, Home as HomeIcon, Sparkles } from 'lucide-react'
+import { LogOut, LayoutDashboard, Home as HomeIcon, Sparkles, Plus } from 'lucide-react'
 
 export const Navbar: React.FC = () => {
   const { user, profile, signOut } = useAuth()
@@ -40,6 +40,13 @@ export const Navbar: React.FC = () => {
 
           {user ? (
             <div className="flex items-center gap-2 sm:gap-3">
+              <Link
+                to="/dashboard?action=anunciar"
+                className="text-xs font-extrabold text-white px-3.5 py-2 rounded-xl-cozy shadow-xs shadow-emerald-500/10 hover:shadow-md transition-all duration-300 cozy-button-gradient hover:scale-102 active:scale-98 flex items-center gap-1.5"
+              >
+                <Plus size={12} />
+                <span className="hidden sm:inline">Anunciar</span>
+              </Link>
               {/* Perfil & Dashboard Link */}
               <Link 
                 to="/dashboard" 

@@ -13,6 +13,12 @@ export interface UsuarioProfile {
   tipo?: 'morador' | 'prestador'
   prestador_aprovado?: boolean
   prestador_expiracao?: string
+  empresa_nome?: string
+  celular?: string
+  cidade?: string
+  categoria_prestador?: number
+  comprovante_url?: string
+  pagamento_status?: 'pago' | 'aberto'
 }
 
 interface AuthContextType {
@@ -64,7 +70,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           avatar_url: currentUser.user_metadata?.avatar_url || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=150',
           email: currentUser.email,
           tipo: 'morador',
-          prestador_aprovado: false
+          prestador_aprovado: false,
+          pagamento_status: 'aberto'
         })
       }
     } catch (e) {

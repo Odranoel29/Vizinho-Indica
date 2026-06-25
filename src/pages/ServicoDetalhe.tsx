@@ -3,7 +3,7 @@ import { useParams, Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import { StarRating } from '../components/StarRating'
 import { useAuth } from '../contexts/AuthContext'
-import { Phone, Heart, ArrowLeft, ShieldCheck, Calendar, MessageSquare, AlertCircle, Star, Loader, Flag, Lock } from 'lucide-react'
+import { Phone, Heart, ArrowLeft, ShieldCheck, Calendar, MessageSquare, AlertCircle, Star, Loader, Flag, Lock, Camera, X, ImageUp } from 'lucide-react'
 
 export const ServicoDetalhe: React.FC = () => {
   const { id } = useParams<{ id: string }>()
@@ -23,6 +23,16 @@ export const ServicoDetalhe: React.FC = () => {
   const [denunciaMotivo, setDenunciaMotivo] = useState('')
   const [denunciaLoading, setDenunciaLoading] = useState(false)
 
+  const [isOwner, setIsOwner] = useState(false)
+  const [imageModalOpen, setImageModalOpen] = useState(false)
+  const [imageFile, setImageFile] = useState<File | null>(null)
+  const [imagePreview, setImagePreview] = useState<string>('')
+  const [imageUrl, setImageUrl] = useState('')
+  const [imageUploading, setImageUploading] = useState(false)
+  const [podeAvaliar, setPodeAvaliar] = useState(false)
+  const [interacaoId, setInteracaoId] = useState<number | null>(null)
+  const [jaAvaliou, setJaAvaliou] = useState(false)
+
   const fallbackServiceImage = 'https://images.unsplash.com/photo-1581578731548-c64695cc6952?auto=format&fit=crop&w=800&q=80'
   const fallbackAvatar = 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=150'
 
@@ -30,7 +40,8 @@ export const ServicoDetalhe: React.FC = () => {
     const fetchServiceData = async () => {
       try {
         setLoading(true)
-        
+        let ownerId: number | undefined
+
         const { data: serviceData, error: serviceError } = await supabase
           .from('v_servicos_destaque')
           .select('*')
@@ -41,41 +52,45 @@ export const ServicoDetalhe: React.FC = () => {
         
         if (serviceData) {
           setService(serviceData)
+          ownerId = serviceData.autor_id
         } else {
           // Fallback caso não seja retornado pela view (ex: sem avaliações)
-          const { data: fallbackData } = await supabase
+          const { data: fbData } = await supabase
             .from('servicos')
             .select('*, usuarios:criado_por(*)')
             .eq('id', id)
             .maybeSingle()
           
-          if (fallbackData) {
+          if (fbData) {
             setService({
-              servico_id: fallbackData.id,
-              titulo: fallbackData.titulo,
-              descricao: fallbackData.descricao,
-              preco_estimado: fallbackData.preco_estimado,
-              preco_detalhe: fallbackData.preco_detalhe,
-              foto_url: fallbackData.foto_url,
-              whatsapp: fallbackData.whatsapp,
-              autor_id: fallbackData.usuarios?.id,
-              autor_nome: fallbackData.usuarios?.nome_completo,
-              autor_avatar: fallbackData.usuarios?.avatar_url,
-              autor_bio: fallbackData.usuarios?.bio,
+              servico_id: fbData.id,
+              titulo: fbData.titulo,
+              descricao: fbData.descricao,
+              preco_estimado: fbData.preco_estimado,
+              preco_detalhe: fbData.preco_detalhe,
+              foto_url: fbData.foto_url,
+              whatsapp: fbData.whatsapp,
+              autor_id: fbData.usuarios?.id,
+              autor_nome: fbData.usuarios?.nome_completo,
+              autor_avatar: fbData.usuarios?.avatar_url,
+              autor_bio: fbData.usuarios?.bio,
               media_notas: 0,
               total_avaliacoes: 0
             })
+            ownerId = fbData.criado_por
           }
         }
 
         // Buscar as avaliações
-        const { data: reviewsData } = await supabase
-          .from('avaliacoes')
-          .select('*, usuarios(nome_completo, avatar_url)')
-          .eq('servico_id', id)
+        if (ownerId) {
+          const { data: reviewsData } = await supabase
+            .from('avaliacoes')
+            .select('*, interacoes!inner(cliente_nome)')
+            .eq('prestador_id', ownerId)
 
-        if (reviewsData) {
-          setReviews(reviewsData)
+          if (reviewsData) {
+            setReviews(reviewsData)
+          }
         }
 
         // Verificar se está favoritado
@@ -98,6 +113,41 @@ export const ServicoDetalhe: React.FC = () => {
           setIsFavorited(localFavs.includes(Number(id)))
         }
 
+        // Verificar se o usuário é o dono do serviço
+        if (profile && ownerId) {
+          setIsOwner(profile.id === ownerId)
+        } else {
+          setIsOwner(false)
+        }
+
+        // Verificar interação liberada para avaliação
+        if (profile?.whatsapp && ownerId) {
+          const { data: interacao } = await supabase
+            .from('interacoes')
+            .select('id')
+            .eq('prestador_id', ownerId)
+            .eq('cliente_whatsapp', profile.whatsapp)
+            .eq('status', 'LIBERADO')
+            .maybeSingle()
+
+          if (interacao) {
+            setPodeAvaliar(true)
+            setInteracaoId(interacao.id)
+          }
+
+          const { data: jaAvaliado } = await supabase
+            .from('interacoes')
+            .select('id')
+            .eq('prestador_id', ownerId)
+            .eq('cliente_whatsapp', profile.whatsapp)
+            .eq('status', 'AVALIADO')
+            .maybeSingle()
+
+          if (jaAvaliado) {
+            setJaAvaliou(true)
+          }
+        }
+
       } catch (err) {
         console.error('Erro ao buscar serviço:', err)
       } finally {
@@ -108,7 +158,7 @@ export const ServicoDetalhe: React.FC = () => {
     if (id) {
       fetchServiceData()
     }
-  }, [id, user])
+  }, [id, user, profile])
 
   const handleFavoriteToggle = async () => {
     if (!service) return
@@ -159,6 +209,16 @@ export const ServicoDetalhe: React.FC = () => {
 
     try {
       await supabase
+        .from('interacoes')
+        .insert({
+          prestador_id: service.autor_id,
+          cliente_nome: profile?.nome_completo || user.email?.split('@')[0] || 'Vizinho',
+          cliente_whatsapp: profile?.whatsapp || '',
+          data_contato: new Date().toISOString(),
+          status: 'PENDENTE'
+        })
+
+      await supabase
         .from('contatos')
         .insert({
           servico_id: service.servico_id,
@@ -167,9 +227,7 @@ export const ServicoDetalhe: React.FC = () => {
           created_at: new Date().toISOString()
         })
     } catch (err) {
-      const clicks = JSON.parse(localStorage.getItem('whatsapp_clicks') || '{}')
-      clicks[service.servico_id] = (clicks[service.servico_id] || 0) + 1
-      localStorage.setItem('whatsapp_clicks', JSON.stringify(clicks))
+      console.error('Erro ao registrar interação:', err)
     }
 
     const cleanedNumber = service.whatsapp ? service.whatsapp.replace(/\D/g, '') : ''
@@ -181,38 +239,99 @@ export const ServicoDetalhe: React.FC = () => {
   }
 
   const handleSubmitReview = async () => {
-    if (!user || !profile || !service || reviewNota === 0) return
+    if (!user || !profile || !service || reviewNota === 0 || !interacaoId) return
     setReviewLoading(true)
 
     try {
       const { error } = await supabase
         .from('avaliacoes')
         .insert({
-          servico_id: service.servico_id,
-          autor_id: profile.id,
+          interacao_id: interacaoId,
+          prestador_id: service.autor_id,
           nota: reviewNota,
-          comentario: reviewComentario || null
+          comentario: reviewComentario || null,
+          data_avaliacao: new Date().toISOString()
         })
 
       if (error) throw error
 
+      await supabase
+        .from('interacoes')
+        .update({ status: 'AVALIADO', updated_at: new Date().toISOString() })
+        .eq('id', interacaoId)
+
+      await supabase.rpc('recalcular_metricas_prestador', { p_prestador_id: service.autor_id })
+
       setReviewNota(0)
       setReviewComentario('')
+      setPodeAvaliar(false)
+      setJaAvaliou(true)
       setToast({ show: true, message: 'Avaliação enviada com sucesso!', type: 'success' })
       setTimeout(() => setToast(t => ({ ...t, show: false })), 3000)
-
-      // Recarregar avaliações
-      const { data: reviewsData } = await supabase
-        .from('avaliacoes')
-        .select('*, usuarios(nome_completo, avatar_url)')
-        .eq('servico_id', id)
-      if (reviewsData) setReviews(reviewsData)
 
     } catch (err: any) {
       setToast({ show: true, message: err.message || 'Erro ao enviar avaliação.', type: 'error' })
       setTimeout(() => setToast(t => ({ ...t, show: false })), 3000)
     } finally {
       setReviewLoading(false)
+    }
+  }
+
+  const openImageModal = () => {
+    setImageFile(null)
+    setImagePreview('')
+    setImageUrl('')
+    setImageModalOpen(true)
+  }
+
+  const handleImageChange = async () => {
+    if (!service || !profile) return
+    setImageUploading(true)
+
+    try {
+      let fotoUrlFinal = imageUrl || null
+
+      if (imageFile) {
+        const fileExt = imageFile.name.split('.').pop()?.toLowerCase() || 'jpg'
+        const fileName = `${Date.now()}-${Math.random().toString(36).slice(2)}.${fileExt}`
+        const filePath = `${profile.id}/${fileName}`
+
+        const { error: uploadError } = await supabase.storage
+          .from('servicos')
+          .upload(filePath, imageFile, {
+            cacheControl: '3600',
+            upsert: false
+          })
+
+        if (uploadError) throw uploadError
+
+        const { data: publicUrlData } = supabase.storage
+          .from('servicos')
+          .getPublicUrl(filePath)
+
+        fotoUrlFinal = publicUrlData?.publicUrl || null
+      }
+
+      if (!fotoUrlFinal) {
+        throw new Error('Selecione uma imagem ou insira uma URL.')
+      }
+
+      const { error: updateError } = await supabase
+        .from('servicos')
+        .update({ foto_url: fotoUrlFinal })
+        .eq('id', service.servico_id)
+
+      if (updateError) throw updateError
+
+      setService({ ...service, foto_url: fotoUrlFinal })
+      setImageModalOpen(false)
+      setToast({ show: true, message: 'Imagem de capa atualizada com sucesso!', type: 'success' })
+      setTimeout(() => setToast(t => ({ ...t, show: false })), 3000)
+    } catch (err: any) {
+      setToast({ show: true, message: err.message || 'Erro ao atualizar imagem.', type: 'error' })
+      setTimeout(() => setToast(t => ({ ...t, show: false })), 3000)
+    } finally {
+      setImageUploading(false)
     }
   }
 
@@ -291,12 +410,23 @@ export const ServicoDetalhe: React.FC = () => {
         
         {/* Coluna Esquerda */}
         <div className="lg:col-span-2 flex flex-col gap-6">
-          <div className="aspect-video w-full rounded-2xl-cozy overflow-hidden bg-slate-50 border border-slate-100 relative">
+          <div className="aspect-video w-full rounded-2xl-cozy overflow-hidden bg-slate-50 border border-slate-100 relative group">
             <img
               src={service.foto_url || fallbackServiceImage}
               alt={service.titulo}
               className="w-full h-full object-cover"
             />
+            {isOwner && (
+              <button
+                onClick={openImageModal}
+                className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-all duration-300 flex items-center justify-center cursor-pointer"
+              >
+                <div className="opacity-0 group-hover:opacity-100 transition-all duration-300 flex flex-col items-center gap-1.5 bg-white/90 text-slate-700 px-4 py-2.5 rounded-2xl-cozy shadow-lg">
+                  <Camera size={18} />
+                  <span className="text-[10px] font-bold uppercase tracking-wider">Alterar Capa</span>
+                </div>
+              </button>
+            )}
           </div>
 
           <div className="flex flex-col gap-3">
@@ -353,14 +483,12 @@ export const ServicoDetalhe: React.FC = () => {
                   <div key={rev.id} className="bg-white rounded-2xl-cozy border border-slate-100 p-5 shadow-xs flex flex-col gap-3">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2.5">
-                        <img
-                          src={rev.usuarios?.avatar_url || fallbackAvatar}
-                          alt={rev.usuarios?.nome_completo || 'Vizinho'}
-                          className="w-7 h-7 rounded-full object-cover border border-slate-100"
-                        />
+                        <div className="w-7 h-7 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-700 font-bold text-xs border border-slate-100">
+                          {(rev.interacoes?.cliente_nome || 'V')[0]}
+                        </div>
                         <div>
                           <span className="font-bold text-slate-700 text-xs block leading-tight">
-                            {rev.usuarios?.nome_completo || 'Vizinho'}
+                            {rev.interacoes?.cliente_nome || 'Vizinho'}
                           </span>
                           <span className="text-[8px] text-slate-400 font-semibold uppercase mt-0.5">
                             {new Date(rev.created_at || Date.now()).toLocaleDateString('pt-BR')}
@@ -386,10 +514,13 @@ export const ServicoDetalhe: React.FC = () => {
           </div>
 
           {/* Formulario de Avaliação */}
-          {user && (
-            <div className="bg-white rounded-2xl-cozy border border-slate-100 p-5 shadow-xs flex flex-col gap-4">
-              <h3 className="font-bold text-slate-800 text-xs uppercase tracking-wider">Avaliar este serviço</h3>
-              <p className="text-[10px] text-slate-400">Já contratou este serviço? Deixe sua avaliação!</p>
+          {user && podeAvaliar && (
+            <div className="bg-white rounded-2xl-cozy border border-emerald-200 p-5 shadow-xs flex flex-col gap-4">
+              <div className="flex items-center gap-2">
+                <MessageSquare size={14} className="text-emerald-600" />
+                <h3 className="font-bold text-slate-800 text-xs uppercase tracking-wider">Avaliar este serviço</h3>
+              </div>
+              <p className="text-[10px] text-slate-500">Você clicou no WhatsApp deste prestador. Conte sua experiência!</p>
 
               <div className="flex items-center gap-1">
                 {[1, 2, 3, 4, 5].map((n) => (
@@ -423,6 +554,13 @@ export const ServicoDetalhe: React.FC = () => {
                 {reviewLoading ? <Loader size={12} className="animate-spin" /> : <MessageSquare size={12} />}
                 {reviewLoading ? 'Enviando...' : 'Enviar Avaliação'}
               </button>
+            </div>
+          )}
+
+          {user && jaAvaliou && (
+            <div className="bg-slate-50 rounded-2xl-cozy border border-slate-200 p-5 flex items-center gap-3">
+              <MessageSquare size={16} className="text-slate-400" />
+              <p className="text-xs text-slate-500">Você já avaliou este serviço. Obrigado pelo feedback!</p>
             </div>
           )}
 
@@ -554,6 +692,86 @@ export const ServicoDetalhe: React.FC = () => {
                   >
                     {denunciaLoading ? <Loader size={12} className="animate-spin" /> : <Flag size={12} />}
                     {denunciaLoading ? 'Enviando...' : 'Enviar Denúncia'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Modal Alterar Capa */}
+          {imageModalOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-xs p-6">
+              <div className="bg-white max-w-sm w-full rounded-3xl-cozy p-6 shadow-xl flex flex-col gap-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-extrabold text-slate-800 text-sm">Alterar Imagem de Capa</h3>
+                  <button
+                    onClick={() => setImageModalOpen(false)}
+                    className="p-1 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+
+                <label className="relative flex flex-col items-center justify-center w-full h-32 rounded-2xl-cozy border-2 border-dashed border-slate-200 bg-slate-50/50 hover:bg-slate-100/50 hover:border-emerald-400 transition-all duration-300 cursor-pointer group overflow-hidden">
+                  {imagePreview ? (
+                    <>
+                      <img src={imagePreview} alt="Preview" className="w-full h-full object-cover absolute inset-0" />
+                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-all duration-300 flex items-center justify-center">
+                        <ImageUp size={22} className="text-white opacity-0 group-hover:opacity-100 transition-all duration-300" />
+                      </div>
+                    </>
+                  ) : (
+                    <div className="flex flex-col items-center gap-1.5">
+                      <ImageUp size={22} className="text-slate-300 group-hover:text-emerald-500 transition-colors" />
+                      <span className="text-[10px] font-bold text-slate-400 group-hover:text-emerald-600 transition-colors">Clique para selecionar .jpg</span>
+                    </div>
+                  )}
+                  <input
+                    type="file"
+                    accept=".jpg,.jpeg,.png,.webp"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0]
+                      if (file) {
+                        setImageFile(file)
+                        setImagePreview(URL.createObjectURL(file))
+                        setImageUrl('')
+                      }
+                    }}
+                  />
+                </label>
+
+                <div className="relative">
+                  <span className="text-[9px] text-slate-400 pl-1">Ou cole uma URL</span>
+                  <input
+                    type="url"
+                    placeholder="https://link-da-imagem.com/servico.jpg"
+                    value={imageUrl}
+                    onChange={(e) => {
+                      setImageUrl(e.target.value)
+                      if (e.target.value) {
+                        setImageFile(null)
+                        setImagePreview('')
+                      }
+                    }}
+                    className="w-full px-4 py-2 rounded-2xl-cozy border border-slate-200 text-slate-700 placeholder-slate-400 focus:outline-hidden focus:border-emerald-500 text-xs bg-slate-50/50 mt-1"
+                  />
+                </div>
+
+                <div className="flex items-center gap-2 justify-end">
+                  <button
+                    onClick={() => setImageModalOpen(false)}
+                    className="px-4 py-2 rounded-xl-cozy border border-slate-200 text-slate-500 font-bold text-xs hover:bg-slate-50 transition-all cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    onClick={handleImageChange}
+                    disabled={(!imageFile && !imageUrl.trim()) || imageUploading}
+                    className="px-4 py-2 rounded-xl-cozy bg-emerald-600 text-white font-bold text-xs hover:bg-emerald-700 transition-all disabled:opacity-50 cursor-pointer flex items-center gap-1.5"
+                  >
+                    {imageUploading ? <Loader size={12} className="animate-spin" /> : <Camera size={12} />}
+                    {imageUploading ? 'Enviando...' : 'Salvar'}
                   </button>
                 </div>
               </div>
